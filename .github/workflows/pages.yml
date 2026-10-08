@@ -25,9 +25,34 @@ jobs:
       - uses: actions/configure-pages@v5
         with:
           enablement: true
+      - name: Prepare bridge-safe static site
+        run: |
+          mkdir -p dist
+          cp index.html .nojekyll dist/
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("dist/index.html")
+          text = path.read_text()
+          old = """    document.open();
+              document.write(html);
+              document.close();"""
+          new = """    const parsed = new DOMParser().parseFromString(html, 'text/html');
+              document.head.innerHTML = parsed.head.innerHTML;
+              document.body.innerHTML = parsed.body.innerHTML;
+              for (const oldScript of Array.from(document.body.querySelectorAll('script'))) {
+                const script = document.createElement('script');
+                for (const attr of Array.from(oldScript.attributes)) script.setAttribute(attr.name, attr.value);
+                script.textContent = oldScript.textContent || '';
+                oldScript.replaceWith(script);
+              }"""
+          if old not in text:
+              raise SystemExit("Expected document.open loader block not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: .
+          path: dist
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
