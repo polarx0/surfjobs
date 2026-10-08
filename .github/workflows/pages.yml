@@ -48,7 +48,68 @@ jobs:
               }"""
           if old not in text:
               raise SystemExit("Expected document.open loader block not found")
-          path.write_text(text.replace(old, new, 1))
+          text = text.replace(old, new, 1)
+
+          shim = r'''<script>
+          (function () {
+            if (window.__SURFJOBS_TEAMTAILOR_HANDOFF__) return;
+            window.__SURFJOBS_TEAMTAILOR_HANDOFF__ = true;
+
+            function profileFromForm() {
+              var ids = ["firstName","lastName","email","country","phone","location","linkedin","github",
+                "workAuthorization","sponsorshipRequired","englishProficiency","salaryCurrency","salaryExpectation","resumePath"];
+              var profile = {};
+              ids.forEach(function (id) {
+                var node = document.getElementById(id);
+                if (!node) return;
+                var value = String(node.value || "").trim();
+                if (value) profile[id] = value;
+              });
+              return profile;
+            }
+
+            document.addEventListener("click", async function (event) {
+              var target = event.target && event.target.closest ? event.target.closest("#continueApplication") : null;
+              if (!target) return;
+
+              var urlNode = document.getElementById("jobUrl");
+              var url = urlNode ? String(urlNode.value || "").trim() : "";
+              var host = "";
+              try { host = new URL(url).hostname.toLowerCase(); } catch (_) { return; }
+              if (!(host === "careers.investengine.com" || host.endsWith(".teamtailor.com"))) return;
+
+              event.preventDefault();
+              event.stopImmediatePropagation();
+              var popup = window.open("about:blank", "_blank");
+              target.disabled = true;
+              target.textContent = "Opening application in Chrome…";
+
+              try {
+                var response = await fetch("/companion/profile", {
+                  method: "POST",
+                  headers: { "content-type": "application/json" },
+                  body: JSON.stringify({ profile: profileFromForm(), applicationUrl: url })
+                });
+                var result = await response.json();
+                if (!response.ok) throw new Error(result.message || result.error || "Could not prepare SurfJobs companion");
+                if (popup) popup.location.href = url;
+                else window.open(url, "_blank");
+
+                var review = document.getElementById("review");
+                if (review) review.innerHTML = '<div class="review-summary ready"><div class="review-heading"><div class="review-icon">↗</div><div><div class="review-title">Application opened in Chrome</div><div class="review-meta">Teamtailor companion mode: click Apply for this job, then Fill with SurfJobs. Final Submit remains manual.</div></div></div></div>';
+              } catch (error) {
+                if (popup) popup.close();
+                var topError = document.getElementById("topError");
+                if (topError) topError.innerHTML = '<div class="error">' + String(error && (error.message || error) || "SurfJobs companion failed") + '</div>';
+              } finally {
+                target.disabled = false;
+                target.textContent = "Save & Open Application";
+              }
+            }, true);
+          })();
+          </script>'''
+          text = text.replace("</body>", shim + "</body>", 1)
+          path.write_text(text)
           PY
       - uses: actions/upload-pages-artifact@v3
         with:
