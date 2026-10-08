@@ -30,10 +30,29 @@ jobs:
           mkdir -p dist
           cp index.html .nojekyll dist/
           python3 - <<'PY'
+          import base64
+          import gzip
+          import re
           from pathlib import Path
 
           path = Path("dist/index.html")
           text = path.read_text()
+
+          payload_match = re.search(r"const payload = '([^']+)';", text)
+          if not payload_match:
+              raise SystemExit("SurfJobs payload not found")
+
+          html = gzip.decompress(base64.b64decode(payload_match.group(1))).decode("utf-8")
+          old_badge = "MVP · Greenhouse + Indeed"
+          new_badge = "MVP · Greenhouse + Teamtailor + Indeed"
+          if old_badge in html:
+              html = html.replace(old_badge, new_badge, 1)
+          elif new_badge not in html:
+              raise SystemExit("Expected supported-platform badge not found")
+
+          payload = base64.b64encode(gzip.compress(html.encode("utf-8"), mtime=0)).decode("ascii")
+          text = text[:payload_match.start(1)] + payload + text[payload_match.end(1):]
+
           old = """    document.open();
               document.write(html);
               document.close();"""
