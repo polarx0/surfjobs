@@ -19,6 +19,11 @@
     const oldCompanionHost = 'host === "careers.investengine.com";';
     const newCompanionHost = 'host === "careers.investengine.com" || host === "careers-page.com" || host.endsWith(".careers-page.com");';
     if (html.includes(oldCompanionHost)) html = html.replace(oldCompanionHost, newCompanionHost);
+    // Before the bundled UI installs /preview handlers, install the dedicated
+    // Manatal Companion route. This preserves the existing compressed bundle
+    // while the source repo builds a fully updated Pages version.
+    const manatalScript = '<script src="./manatal-companion.js"><' + '/script>';
+    html = html.replace('</head>', manatalScript + '</head>');
     document.open();
     document.write(html);
     document.close();
