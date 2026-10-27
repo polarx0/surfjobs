@@ -19,11 +19,28 @@
     const oldCompanionHost = 'host === "careers.investengine.com";';
     const newCompanionHost = 'host === "careers.investengine.com" || host === "careers-page.com" || host.endsWith(".careers-page.com");';
     if (html.includes(oldCompanionHost)) html = html.replace(oldCompanionHost, newCompanionHost);
-    // Before the bundled UI installs /preview handlers, install the dedicated
-    // Manatal Companion route. This preserves the existing compressed bundle
-    // while the source repo builds a fully updated Pages version.
-    const manatalScript = '<script src="./manatal-companion.js"><' + '/script>';
-    html = html.replace('</head>', manatalScript + '</head>');
+
+    // Patch the embedded legacy UI itself before document.write. An external
+    // click-interceptor script runs too late on certain cached Chrome pages.
+    // This code is copied from the source project's tested Manatal UI handler.
+    const manatalFunctions = "      function isManatalCareerUrl(value) {\n        try {\n          var parsed = new URL(value);\n          var host = parsed.hostname.toLowerCase();\n          return parsed.protocol === \"https:\" &&\n            (host === \"careers-page.com\" || host.endsWith(\".careers-page.com\")) &&\n            new RegExp(\"^/[^/]+/job/[^/]+(?:/apply)?/?$\", \"i\").test(parsed.pathname);\n        } catch (_) {\n          return false;\n        }\n      }\n\n      async function openManatalInCompanion(url, profile) {\n        // Open synchronously on the user click, before awaiting the local agent.\n        var popup = window.open(\"about:blank\", \"_blank\");\n        setBusy(true, \"Opening Manatal…\");\n        try {\n          var response = await fetch(\"/companion/profile\", {\n            method: \"POST\",\n            headers: { \"content-type\": \"application/json\" },\n            body: JSON.stringify({ profile: profile, applicationUrl: url })\n          });\n          var data = await response.json();\n          if (!response.ok) throw new Error(data.message || data.error || \"Could not prepare SurfJobs Companion\");\n\n          if (popup) popup.location.href = url;\n          byId(\"review\").innerHTML =\n            '<div class=\"review-summary ready\"><div class=\"review-heading\">' +\n              '<div class=\"review-icon\">↗</div><div>' +\n                '<div class=\"review-title\">Manatal application opened in Chrome</div>' +\n                '<div class=\"review-meta\">Click Fill with SurfJobs on the application page. Review the fields and attached resume before manually submitting.</div>' +\n              '</div></div></div>';\n          if (!popup) {\n            var fallback = document.createElement(\"a\");\n            fallback.href = url;\n            fallback.target = \"_blank\";\n            fallback.rel = \"noopener noreferrer\";\n            fallback.textContent = \"Open application in Chrome\";\n            byId(\"review\").appendChild(fallback);\n          }\n        } catch (error) {\n          if (popup) popup.close();\n          byId(\"review\").innerHTML = '<div class=\"error\">' +\n            escapeHtml(error.message || error) + '</div>';\n        } finally {\n          setBusy(false);\n        }\n      }\n\n";
+    const manatalFunctionsAnchor = '      function isIndeedLikeUrl(url) {';
+    const hintAnchor = '        if (!url || isIndeedLikeUrl(url)) return;';
+    const saveAnchor = '        if (isIndeedLikeUrl(url)) {\\n          renderIndeedOpening();';
+    if (!html.includes(manatalFunctionsAnchor) ||
+        !html.includes(hintAnchor) ||
+        !html.includes(saveAnchor)) {
+      throw new Error("SurfJobs page bundle is missing expected Manatal patch anchors");
+    }
+    html = html.replace(manatalFunctionsAnchor, manatalFunctions + manatalFunctionsAnchor);
+    html = html.replace(hintAnchor,
+      '        if (!url || isIndeedLikeUrl(url) || isManatalCareerUrl(url)) return;');
+    html = html.replace(saveAnchor,
+      '        if (isManatalCareerUrl(url)) {\\n' +
+      '          await openManatalInCompanion(url, profile);\\n' +
+      '          return;\\n' +
+      '        }\\n\\n' + saveAnchor);
+
     document.open();
     document.write(html);
     document.close();
